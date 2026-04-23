@@ -25,6 +25,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:       # allow manual runs from the GitHub Actions UI
 
 permissions:
   contents: read
@@ -74,7 +75,9 @@ jobs:
         run: pip install build
 
       # Verify the git tag matches __version__ in polyvia/__init__.py
+      # (skipped for manual workflow_dispatch runs)
       - name: Check version consistency
+        if: github.event_name == 'push'
         run: |
           TAG="${GITHUB_REF_NAME}"          # e.g. v0.1.1
           PKG_VER="$(python -c "import polyvia; print(polyvia.__version__)")"
