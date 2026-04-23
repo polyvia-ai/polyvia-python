@@ -80,7 +80,7 @@ jobs:
         if: github.event_name == 'push'
         run: |
           TAG="${GITHUB_REF_NAME}"          # e.g. v0.1.1
-          PKG_VER="$(python -c "import polyvia; print(polyvia.__version__)")"
+          PKG_VER="$(grep -m1 '__version__' polyvia/__init__.py | cut -d'"' -f2)"
           EXPECTED="v${PKG_VER}"
           if [ "$TAG" != "$EXPECTED" ]; then
             echo "❌ Tag '$TAG' does not match package version '$PKG_VER' (expected '$EXPECTED')"
