@@ -306,7 +306,6 @@ def as_langchain_tools(client: "Polyvia") -> List[Any]:
     lc_tools = []
     for t in _TOOLS:
         name = t["name"]
-        schema = t["parameters"]
 
         def _run(executor=executor, name=name, **kwargs: Any) -> str:
             result = executor(name, kwargs)
