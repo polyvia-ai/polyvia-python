@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "polyvia"
+version = "0.1.0"
+description = "Python SDK for the Polyvia document intelligence API and MCP server"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Polyvia", email = "senyao@polyvia.ai" }]
+keywords = ["polyvia", "document", "ai", "mcp", "rag", "agents"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = ["httpx>=0.24.0", "pydantic>=2.0.0"]
+
+[project.optional-dependencies]
+langchain = ["langchain-core>=0.1.0"]
+dev = [
+  "pytest>=7.0",
+  "pytest-asyncio>=0.21",
+  "pytest-httpx>=0.21",
+  "ruff>=0.1.0",
+  "mypy>=1.0",
+]
+
+[project.urls]
+Homepage = "https://polyvia.ai"
+Documentation = "https://docs.polyvia.ai"
+Repository = "https://github.com/polyvia-ai/polyvia-python"
+"Bug Tracker" = "https://github.com/polyvia-ai/polyvia-python/issues"
+
+[tool.hatch.version]
+path = "polyvia/__init__.py"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.mypy]
+python_version = "3.9"
+strict = true

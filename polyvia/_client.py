@@ -1,0 +1,668 @@
+"""
+Polyvia Python SDK — sync and async clients.
+
+Typical usage::
+
+    from polyvia import Polyvia
+
+    client = Polyvia(api_key="poly_...")
+
+    # Ingest a document and wait for it to be ready
+    result = client.ingest.file("report.pdf", name="Q4 Report")
+    doc    = client.ingest.wait(result.task_id)
+
+    # Query it
+    answer = client.query("What are the key findings?", document_id=doc.document_id)
+    print(answer.answer)
+
+    # Connect an AI assistant via MCP
+    client.mcp.print_claude_desktop_snippet()
+"""
+
+from __future__ import annotations
+
+import mimetypes
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from ._exceptions import IngestionError, IngestionTimeout
+from ._models import (
+    BatchIngestItem,
+    BatchIngestResult,
+    Document,
+    Group,
+    IngestionStatus,
+    IngestResult,
+    QueryResult,
+    RateLimits,
+    Usage,
+)
+from ._tools import as_anthropic_tools, as_langchain_tools, as_openai_tools
+from ._transport import AsyncTransport, SyncTransport
+from .mcp import MCPConfig
+
+
+# ── Sync resource namespaces ──────────────────────────────────────────────────
+
+
+class IngestResource:
+    """client.ingest — document ingestion methods."""
+
+    def __init__(self, transport: SyncTransport) -> None:
+        self._t = transport
+
+    def file(
+        self,
+        path: str | Path,
+        *,
+        name: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> IngestResult:
+        """Upload a single file and queue it for parsing.
+
+        Parameters
+        ----------
+        path:
+            Path to the file on disk.
+        name:
+            Display name in Polyvia. Defaults to the filename.
+        group_id:
+            Assign the document to a group on creation.
+
+        Returns
+        -------
+        IngestResult
+            Contains ``document_id`` and ``task_id``. Poll
+            :meth:`status` or call :meth:`wait` to track progress.
+        """
+        p = Path(path)
+        mime = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
+        data: Dict[str, str] = {}
+        if name:
+            data["name"] = name
+        if group_id:
+            data["group_id"] = group_id
+
+        with p.open("rb") as fh:
+            raw = self._t.post(
+                "/api/v1/ingest",
+                files={"file": (p.name, fh, mime)},
+                data=data or None,
+            )
+        return IngestResult(**raw)
+
+    def batch(
+        self,
+        paths: List[str | Path],
+        *,
+        names: Optional[List[str]] = None,
+        group_id: Optional[str] = None,
+    ) -> BatchIngestResult:
+        """Upload multiple files in a single request.
+
+        Parameters
+        ----------
+        paths:
+            List of file paths.
+        names:
+            Optional list of display names aligned to ``paths``.
+        group_id:
+            Assign all documents to the same group.
+        """
+        files = []
+        for p in paths:
+            p = Path(p)
+            mime = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
+            files.append(("files", (p.name, open(p, "rb"), mime)))  # noqa: SIM115
+
+        data: Dict[str, str] = {}
+        if names:
+            data["names"] = ",".join(names)
+        if group_id:
+            data["group_id"] = group_id
+
+        try:
+            raw = self._t.post("/api/v1/ingest/batch", files=files, data=data or None)
+        finally:
+            for _, (_, fh, _) in files:
+                fh.close()
+
+        items = [BatchIngestItem(**r) for r in raw["results"]]
+        return BatchIngestResult(results=items, errors=raw.get("errors"))
+
+    def status(self, task_id: str) -> IngestionStatus:
+        """Return the current status of an ingestion task."""
+        raw = self._t.get(f"/api/v1/ingest/{task_id}")
+        return IngestionStatus(**raw)
+
+    def wait(
+        self,
+        task_id: str,
+        *,
+        poll_interval: float = 3.0,
+        timeout: float = 300.0,
+    ) -> IngestionStatus:
+        """Block until the ingestion task reaches a terminal state.
+
+        Parameters
+        ----------
+        task_id:
+            From :meth:`file` or :meth:`batch`.
+        poll_interval:
+            Seconds between status checks (default 3).
+        timeout:
+            Maximum seconds to wait before raising :exc:`IngestionTimeout`.
+
+        Returns
+        -------
+        IngestionStatus
+            With ``status='completed'``.
+
+        Raises
+        ------
+        IngestionError
+            If the task finishes with ``status='failed'``.
+        IngestionTimeout
+            If ``timeout`` is exceeded.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            st = self.status(task_id)
+            if st.status == "completed":
+                return st
+            if st.status == "failed":
+                raise IngestionError(task_id, st.error)
+            if time.monotonic() >= deadline:
+                raise IngestionTimeout(task_id, timeout)
+            time.sleep(poll_interval)
+
+
+class DocumentsResource:
+    """client.documents — document CRUD methods."""
+
+    def __init__(self, transport: SyncTransport) -> None:
+        self._t = transport
+
+    def list(
+        self,
+        *,
+        status: Optional[str] = None,
+        group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
+    ) -> List[Document]:
+        """List documents in the workspace."""
+        params: Dict[str, Any] = {}
+        if status:
+            params["status"] = status
+        if group_ids:
+            params["group_ids"] = ",".join(group_ids)
+        elif group_id:
+            params["group_id"] = group_id
+        raw = self._t.get("/api/v1/documents", params=params or None)
+        return [Document(**d) for d in raw["documents"]]
+
+    def get(self, document_id: str) -> Document:
+        """Get metadata for a single document."""
+        raw = self._t.get(f"/api/v1/documents/{document_id}")
+        return Document(**raw)
+
+    def update(self, document_id: str, *, group_id: Optional[str] = None) -> Dict[str, Any]:
+        """Update a document's metadata (currently: group assignment).
+
+        Pass ``group_id=None`` explicitly to remove it from its current group.
+        """
+        return self._t.patch(f"/api/v1/documents/{document_id}", json={"group_id": group_id})
+
+    def delete(self, document_id: str) -> Dict[str, Any]:
+        """Permanently delete a document and its stored file."""
+        return self._t.delete(f"/api/v1/documents/{document_id}")
+
+
+class GroupsResource:
+    """client.groups — group CRUD methods."""
+
+    def __init__(self, transport: SyncTransport) -> None:
+        self._t = transport
+
+    def list(self) -> List[Group]:
+        """List all groups in the workspace."""
+        raw = self._t.get("/api/v1/groups")
+        return [Group(**g) for g in raw["groups"]]
+
+    def create(self, name: str) -> Dict[str, Any]:
+        """Create a new group and return ``{group_id, name}``."""
+        return self._t.post("/api/v1/groups", json={"name": name})
+
+    def delete_documents(self, group_id: str) -> Dict[str, Any]:
+        """Delete all documents in the group. The group itself is kept."""
+        return self._t.delete(f"/api/v1/groups/{group_id}/documents")
+
+    def delete(self, group_id: str, *, delete_documents: bool = False) -> Dict[str, Any]:
+        """Delete a group.
+
+        Parameters
+        ----------
+        delete_documents:
+            If ``True``, first delete all documents in the group.
+            If ``False`` (default) and the group still has documents, raises a
+            :exc:`~polyvia.APIError` 400.
+        """
+        if delete_documents:
+            self.delete_documents(group_id)
+        return self._t.delete(f"/api/v1/groups/{group_id}")
+
+
+class ToolsResource:
+    """client.tools — agent tool adapters."""
+
+    def __init__(self, client: "Polyvia") -> None:
+        self._client = client
+
+    def openai(self) -> Tuple[List[Dict[str, Any]], Any]:
+        """Return ``(tools, call_tool)`` for the OpenAI ChatCompletion API.
+
+        Example::
+
+            import json, openai
+            tools, call = client.tools.openai()
+
+            response = openai.chat.completions.create(
+                model="gpt-4o", messages=[...], tools=tools
+            )
+            for tc in response.choices[0].message.tool_calls or []:
+                result = call(tc.function.name, json.loads(tc.function.arguments))
+        """
+        return as_openai_tools(self._client)
+
+    def anthropic(self) -> Tuple[List[Dict[str, Any]], Any]:
+        """Return ``(tools, call_tool)`` for the Anthropic Messages API.
+
+        Example::
+
+            import anthropic as ant
+            tools, call = client.tools.anthropic()
+
+            response = ant.Anthropic().messages.create(
+                model="claude-opus-4-5", messages=[...], tools=tools
+            )
+            for block in response.content:
+                if block.type == "tool_use":
+                    result = call(block.name, block.input)
+        """
+        return as_anthropic_tools(self._client)
+
+    def langchain(self) -> List[Any]:
+        """Return LangChain ``BaseTool`` instances.
+
+        Requires ``pip install polyvia[langchain]``.
+
+        Example::
+
+            from langchain_openai import ChatOpenAI
+            from langchain.agents import AgentExecutor, create_tool_calling_agent
+
+            tools = client.tools.langchain()
+            agent = create_tool_calling_agent(ChatOpenAI(model="gpt-4o"), tools, prompt)
+            executor = AgentExecutor(agent=agent, tools=tools)
+            executor.invoke({"input": "What do my documents say about Q4?"})
+        """
+        return as_langchain_tools(self._client)
+
+
+# ── Main sync client ──────────────────────────────────────────────────────────
+
+
+class Polyvia:
+    """Synchronous Polyvia client.
+
+    Parameters
+    ----------
+    api_key:
+        Your ``poly_...`` API key. If omitted, the ``POLYVIA_API_KEY``
+        environment variable is used.
+    base_url:
+        Override the API base URL (default: ``https://app.polyvia.ai``).
+    timeout:
+        HTTP request timeout in seconds (default: 60).
+
+    Example
+    -------
+    ::
+
+        import os
+        from polyvia import Polyvia
+
+        client = Polyvia(api_key=os.environ["POLYVIA_API_KEY"])
+
+        result = client.ingest.file("report.pdf")
+        client.ingest.wait(result.task_id)
+
+        print(client.query("Summarise the report.").answer)
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        *,
+        base_url: str = "https://app.polyvia.ai",
+        timeout: float = 60.0,
+    ) -> None:
+        import os
+
+        resolved_key = api_key or os.environ.get("POLYVIA_API_KEY", "")
+        if not resolved_key:
+            raise ValueError(
+                "api_key is required. Pass it explicitly or set the POLYVIA_API_KEY env var."
+            )
+
+        self._transport = SyncTransport(resolved_key, base_url=base_url, timeout=timeout)
+        self._api_key = resolved_key
+        self._base_url = base_url
+
+        # Resource namespaces
+        self.ingest = IngestResource(self._transport)
+        self.documents = DocumentsResource(self._transport)
+        self.groups = GroupsResource(self._transport)
+        self.tools = ToolsResource(self)
+
+    # ── Top-level methods ─────────────────────────────────────
+
+    def query(
+        self,
+        question: str,
+        *,
+        document_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
+    ) -> QueryResult:
+        """Ask a natural-language question about your documents.
+
+        Parameters
+        ----------
+        question:
+            Your question (max 2 000 characters).
+        document_id:
+            Scope to a single document (fastest).
+        group_id:
+            Scope to one group.
+        group_ids:
+            Scope to multiple groups (takes precedence over ``group_id``).
+
+        Returns
+        -------
+        QueryResult
+            Contains ``answer`` and optionally ``document_id`` / ``group_ids``.
+        """
+        body: Dict[str, Any] = {"query": question}
+        if document_id:
+            body["document_id"] = document_id
+        elif group_ids:
+            body["group_ids"] = group_ids
+        elif group_id:
+            body["group_id"] = group_id
+        raw = self._transport.post("/api/v1/query", json=body)
+        return QueryResult(**raw)
+
+    def usage(self) -> Usage:
+        """Return usage statistics for the current API key."""
+        raw = self._transport.get("/api/v1/usage")
+        return Usage(**raw)
+
+    def rate_limits(self) -> RateLimits:
+        """Return rate-limit configuration and current window usage."""
+        raw = self._transport.get("/api/v1/rate-limits")
+        return RateLimits(**raw)
+
+    # ── MCP property ──────────────────────────────────────────
+
+    @property
+    def mcp(self) -> MCPConfig:
+        """MCP server connection configuration.
+
+        Use to connect Claude Desktop, OpenAI Agents, or any MCP-compatible
+        client to the Polyvia hosted MCP server.
+
+        Example::
+
+            client.mcp.print_claude_desktop_snippet()
+        """
+        return MCPConfig(
+            url=f"{self._base_url}/mcp",
+            headers={"Authorization": f"Bearer {self._api_key}"},
+        )
+
+    # ── Context manager ───────────────────────────────────────
+
+    def close(self) -> None:
+        """Close the underlying HTTP connection pool."""
+        self._transport.close()
+
+    def __enter__(self) -> "Polyvia":
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        self.close()
+
+
+# ── Async resource namespaces ─────────────────────────────────────────────────
+
+
+class AsyncIngestResource:
+    def __init__(self, transport: AsyncTransport) -> None:
+        self._t = transport
+
+    async def file(
+        self,
+        path: str | Path,
+        *,
+        name: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> IngestResult:
+        p = Path(path)
+        mime = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
+        data: Dict[str, str] = {}
+        if name:
+            data["name"] = name
+        if group_id:
+            data["group_id"] = group_id
+        with p.open("rb") as fh:
+            raw = await self._t.post(
+                "/api/v1/ingest",
+                files={"file": (p.name, fh, mime)},
+                data=data or None,
+            )
+        return IngestResult(**raw)
+
+    async def batch(
+        self,
+        paths: List[str | Path],
+        *,
+        names: Optional[List[str]] = None,
+        group_id: Optional[str] = None,
+    ) -> BatchIngestResult:
+        files = []
+        for p in paths:
+            p = Path(p)
+            mime = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
+            files.append(("files", (p.name, open(p, "rb"), mime)))  # noqa: SIM115
+        data: Dict[str, str] = {}
+        if names:
+            data["names"] = ",".join(names)
+        if group_id:
+            data["group_id"] = group_id
+        try:
+            raw = await self._t.post("/api/v1/ingest/batch", files=files, data=data or None)
+        finally:
+            for _, (_, fh, _) in files:
+                fh.close()
+        items = [BatchIngestItem(**r) for r in raw["results"]]
+        return BatchIngestResult(results=items, errors=raw.get("errors"))
+
+    async def status(self, task_id: str) -> IngestionStatus:
+        raw = await self._t.get(f"/api/v1/ingest/{task_id}")
+        return IngestionStatus(**raw)
+
+    async def wait(
+        self,
+        task_id: str,
+        *,
+        poll_interval: float = 3.0,
+        timeout: float = 300.0,
+    ) -> IngestionStatus:
+        import asyncio
+
+        deadline = time.monotonic() + timeout
+        while True:
+            st = await self.status(task_id)
+            if st.status == "completed":
+                return st
+            if st.status == "failed":
+                raise IngestionError(task_id, st.error)
+            if time.monotonic() >= deadline:
+                raise IngestionTimeout(task_id, timeout)
+            await asyncio.sleep(poll_interval)
+
+
+class AsyncDocumentsResource:
+    def __init__(self, transport: AsyncTransport) -> None:
+        self._t = transport
+
+    async def list(
+        self,
+        *,
+        status: Optional[str] = None,
+        group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
+    ) -> List[Document]:
+        params: Dict[str, Any] = {}
+        if status:
+            params["status"] = status
+        if group_ids:
+            params["group_ids"] = ",".join(group_ids)
+        elif group_id:
+            params["group_id"] = group_id
+        raw = await self._t.get("/api/v1/documents", params=params or None)
+        return [Document(**d) for d in raw["documents"]]
+
+    async def get(self, document_id: str) -> Document:
+        raw = await self._t.get(f"/api/v1/documents/{document_id}")
+        return Document(**raw)
+
+    async def update(self, document_id: str, *, group_id: Optional[str] = None) -> Dict[str, Any]:
+        return await self._t.patch(
+            f"/api/v1/documents/{document_id}", json={"group_id": group_id}
+        )
+
+    async def delete(self, document_id: str) -> Dict[str, Any]:
+        return await self._t.delete(f"/api/v1/documents/{document_id}")
+
+
+class AsyncGroupsResource:
+    def __init__(self, transport: AsyncTransport) -> None:
+        self._t = transport
+
+    async def list(self) -> List[Group]:
+        raw = await self._t.get("/api/v1/groups")
+        return [Group(**g) for g in raw["groups"]]
+
+    async def create(self, name: str) -> Dict[str, Any]:
+        return await self._t.post("/api/v1/groups", json={"name": name})
+
+    async def delete_documents(self, group_id: str) -> Dict[str, Any]:
+        return await self._t.delete(f"/api/v1/groups/{group_id}/documents")
+
+    async def delete(self, group_id: str, *, delete_documents: bool = False) -> Dict[str, Any]:
+        if delete_documents:
+            await self.delete_documents(group_id)
+        return await self._t.delete(f"/api/v1/groups/{group_id}")
+
+
+# ── Main async client ─────────────────────────────────────────────────────────
+
+
+class AsyncPolyvia:
+    """Asynchronous Polyvia client — same API as :class:`Polyvia` but all
+    resource methods are coroutines.
+
+    Example
+    -------
+    ::
+
+        import asyncio
+        from polyvia import AsyncPolyvia
+
+        async def main():
+            async with AsyncPolyvia(api_key="poly_...") as client:
+                result = await client.ingest.file("report.pdf")
+                await client.ingest.wait(result.task_id)
+                answer = await client.query("Key findings?")
+                print(answer.answer)
+
+        asyncio.run(main())
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        *,
+        base_url: str = "https://app.polyvia.ai",
+        timeout: float = 60.0,
+    ) -> None:
+        import os
+
+        resolved_key = api_key or os.environ.get("POLYVIA_API_KEY", "")
+        if not resolved_key:
+            raise ValueError(
+                "api_key is required. Pass it explicitly or set the POLYVIA_API_KEY env var."
+            )
+
+        self._transport = AsyncTransport(resolved_key, base_url=base_url, timeout=timeout)
+        self._api_key = resolved_key
+        self._base_url = base_url
+
+        self.ingest = AsyncIngestResource(self._transport)
+        self.documents = AsyncDocumentsResource(self._transport)
+        self.groups = AsyncGroupsResource(self._transport)
+
+    async def query(
+        self,
+        question: str,
+        *,
+        document_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
+    ) -> QueryResult:
+        body: Dict[str, Any] = {"query": question}
+        if document_id:
+            body["document_id"] = document_id
+        elif group_ids:
+            body["group_ids"] = group_ids
+        elif group_id:
+            body["group_id"] = group_id
+        raw = await self._transport.post("/api/v1/query", json=body)
+        return QueryResult(**raw)
+
+    async def usage(self) -> Usage:
+        raw = await self._transport.get("/api/v1/usage")
+        return Usage(**raw)
+
+    async def rate_limits(self) -> RateLimits:
+        raw = await self._transport.get("/api/v1/rate-limits")
+        return RateLimits(**raw)
+
+    @property
+    def mcp(self) -> MCPConfig:
+        return MCPConfig(
+            url=f"{self._base_url}/mcp",
+            headers={"Authorization": f"Bearer {self._api_key}"},
+        )
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()
+
+    async def __aenter__(self) -> "AsyncPolyvia":
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self.aclose()
