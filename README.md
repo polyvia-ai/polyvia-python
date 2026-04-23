@@ -1,6 +1,6 @@
-# polyvia-python
+# Polyvia Python SDK
 
-Official Python SDK for the [Polyvia](https://polyvia.ai) Polyvia AI platform API and MCP server.
+Official Python SDK for the [Polyvia](https://polyvia.ai) AI platform.
 
 ```python
 from polyvia import Polyvia

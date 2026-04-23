@@ -1,0 +1,117 @@
+# Publish polyvia to PyPI on every version tag (v*)
+#
+# Workflow summary
+# ────────────────
+# 1. test    — lint + run the test suite on Python 3.9 / 3.11 / 3.12
+# 2. build   — build sdist + wheel, upload as a workflow artifact
+# 3. publish — download artifact and push to PyPI via OIDC trusted publishing
+#              (no API token stored in GitHub Secrets)
+#
+# Setup (one-time, per repo)
+# ──────────────────────────
+# 1. On PyPI → <package> → Publishing → "Add a new publisher":
+#      Owner:    polyvia-ai
+#      Repo:     polyvia-python
+#      Workflow: publish.yml
+#      Environment: (leave blank)
+# 2. Push a tag:  git tag v0.1.1 && git push origin v0.1.1
+#
+# The tag must match the __version__ in polyvia/__init__.py exactly
+# (e.g. tag v0.1.1  ↔  __version__ = "0.1.1").
+
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 1. Test ──────────────────────────────────────────────────────────────────
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check polyvia
+
+      - name: Run tests
+        run: pytest --tb=short -q
+
+  # ── 2. Build ─────────────────────────────────────────────────────────────────
+  build:
+    name: Build distribution
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build
+
+      # Verify the git tag matches __version__ in polyvia/__init__.py
+      - name: Check version consistency
+        run: |
+          TAG="${GITHUB_REF_NAME}"          # e.g. v0.1.1
+          PKG_VER="$(python -c "import polyvia; print(polyvia.__version__)")"
+          EXPECTED="v${PKG_VER}"
+          if [ "$TAG" != "$EXPECTED" ]; then
+            echo "❌ Tag '$TAG' does not match package version '$PKG_VER' (expected '$EXPECTED')"
+            exit 1
+          fi
+          echo "✅ Tag $TAG matches package version $PKG_VER"
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── 3. Publish ───────────────────────────────────────────────────────────────
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+
+    # Required for OIDC trusted publishing (no API token needed)
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
