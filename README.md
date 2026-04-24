@@ -1,5 +1,10 @@
 # Polyvia Python SDK
 
+[![PyPI](https://img.shields.io/pypi/v/polyvia?style=flat-square&color=6366f1&labelColor=3730a3&logo=python&logoColor=white)](https://pypi.org/project/polyvia)
+[![Python](https://img.shields.io/pypi/pyversions/polyvia?style=flat-square&color=6366f1&labelColor=3730a3&logo=python&logoColor=white)](https://pypi.org/project/polyvia)
+[![License: MIT](https://img.shields.io/badge/license-MIT-6366f1?style=flat-square&labelColor=3730a3)](https://opensource.org/licenses/MIT)
+[![Docs](https://img.shields.io/badge/docs-docs.polyvia.ai-6366f1?style=flat-square&labelColor=3730a3)](https://docs.polyvia.ai/products/python-sdk)
+
 Official Python SDK for the [Polyvia](https://polyvia.ai) AI platform.
 
 ```python
