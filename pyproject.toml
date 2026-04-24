@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "polyvia"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Python SDK for the Polyvia document intelligence API and MCP server"
 readme = "README.md"
 requires-python = ">=3.9"
