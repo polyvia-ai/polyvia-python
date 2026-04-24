@@ -37,8 +37,8 @@ dev = [
 [project.urls]
 Homepage = "https://polyvia.ai"
 Documentation = "https://docs.polyvia.ai"
-Repository = "https://github.com/polyvia-ai/polyvia-python"
-"Bug Tracker" = "https://github.com/polyvia-ai/polyvia-python/issues"
+Repository = "https://github.com/polyvia-ai/polyvia-sdk-python"
+"Bug Tracker" = "https://github.com/polyvia-ai/polyvia-sdk-python/issues"
 
 [tool.hatch.version]
 path = "polyvia/__init__.py"
