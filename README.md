@@ -10,7 +10,7 @@ Official Python SDK for the [Polyvia](https://polyvia.ai) AI platform.
 ```python
 from polyvia import Polyvia
 
-client = Polyvia(api_key="poly_...")
+client = Polyvia(api_key="poly_<key>")
 
 # Ingest → wait → query
 result = client.ingest.file("report.pdf", name="Q4 Report")
@@ -68,10 +68,10 @@ All keys start with `poly_`.
 
 ```python
 # Pass explicitly
-client = Polyvia(api_key="poly_...")
+client = Polyvia(api_key="poly_<key>")
 
 # Or set the environment variable and omit the argument
-# export POLYVIA_API_KEY=poly_...
+# export POLYVIA_API_KEY=poly_<key>
 client = Polyvia()
 ```
 
@@ -83,14 +83,14 @@ client = Polyvia()
 
 ```python
 # Single file — returns immediately with a task_id to poll
-result = client.ingest.file("report.pdf", name="Q4 Report", group_id="g_...")
-# IngestResult(document_id='...', task_id='...', status='pending')
+result = client.ingest.file("report.pdf", name="Q4 Report", group_id="g_<id>")
+# IngestResult(document_id='<id>', task_id='<id>', status='pending')
 
 # Multiple files in one request
 batch = client.ingest.batch(
     ["q3.pdf", "q4.pdf"],
     names=["Q3 Report", "Q4 Report"],
-    group_id="g_...",
+    group_id="g_<id>",
 )
 
 # Check status
@@ -108,13 +108,13 @@ done = client.ingest.wait(result.task_id, poll_interval=5, timeout=300)
 answer = client.query("What risks are mentioned across all reports?")
 
 # Single document (fastest)
-answer = client.query("Summarise section 3.", document_id="doc_...")
+answer = client.query("Summarise section 3.", document_id="doc_<id>")
 
 # Scoped to a group
-answer = client.query("Key findings?", group_id="g_...")
+answer = client.query("Key findings?", group_id="g_<id>")
 
 # Scoped to multiple groups
-answer = client.query("Compare results.", group_ids=["g_...", "g_..."])
+answer = client.query("Compare results.", group_ids=["g_<id>", "g_<id>"])
 
 print(answer.answer)
 ```
@@ -142,18 +142,18 @@ client.groups.delete(group_id)             # remove empty group
 
 ```python
 # List — filter by status and/or group
-docs = client.documents.list(status="completed", group_id="g_...")
-docs = client.documents.list(group_ids=["g_...", "g_..."])
+docs = client.documents.list(status="completed", group_id="g_<id>")
+docs = client.documents.list(group_ids=["g_<id>", "g_<id>"])
 
 # Get one
-doc = client.documents.get("doc_...")
+doc = client.documents.get("doc_<id>")
 
 # Move to a different group / remove from group
-client.documents.update("doc_...", group_id="g_other")
-client.documents.update("doc_...", group_id=None)
+client.documents.update("doc_<id>", group_id="g_other")
+client.documents.update("doc_<id>", group_id=None)
 
 # Delete
-client.documents.delete("doc_...")
+client.documents.delete("doc_<id>")
 ```
 
 ### Usage & Rate Limits
@@ -195,7 +195,7 @@ and query documents without any manual tool-dispatch code.
 from anthropic import Anthropic
 from polyvia import Polyvia
 
-polyvia = Polyvia(api_key="poly_...")
+polyvia = Polyvia(api_key="poly_<key>")
 ant     = Anthropic()
 
 response = ant.beta.messages.create(
@@ -215,7 +215,7 @@ print(response.content[0].text)
     "type": "url",
     "url": "https://app.polyvia.ai/mcp",
     "name": "polyvia",            # customise with name="my-docs"
-    "headers": {"Authorization": "Bearer poly_..."},
+    "headers": {"Authorization": "Bearer poly_<key>"},
 }
 ```
 
@@ -227,7 +227,7 @@ print(response.content[0].text)
 from openai import OpenAI
 from polyvia import Polyvia
 
-polyvia = Polyvia(api_key="poly_...")
+polyvia = Polyvia(api_key="poly_<key>")
 oai     = OpenAI()
 
 response = oai.responses.create(
@@ -245,7 +245,7 @@ print(response.output_text)
     "type": "mcp",
     "server_label": "polyvia",        # customise with server_label="my-docs"
     "server_url": "https://app.polyvia.ai/mcp",
-    "headers": {"Authorization": "Bearer poly_..."},
+    "headers": {"Authorization": "Bearer poly_<key>"},
     "require_approval": "never",      # or "always" to confirm each call
 }
 ```
@@ -259,7 +259,7 @@ from agents import Agent, Runner
 from agents.mcp import MCPServerStreamableHTTP
 from polyvia import Polyvia
 
-polyvia = Polyvia(api_key="poly_...")
+polyvia = Polyvia(api_key="poly_<key>")
 cfg = polyvia.mcp.to_openai_mcp_server()
 
 server = MCPServerStreamableHTTP(url=cfg["url"], headers=cfg["headers"])
@@ -295,7 +295,7 @@ print("Restart Claude Desktop to activate.")
 {
   "type": "http",
   "url": "https://app.polyvia.ai/mcp",
-  "headers": { "Authorization": "Bearer poly_..." }
+  "headers": { "Authorization": "Bearer poly_<key>" }
 }
 ```
 
@@ -317,7 +317,7 @@ import json
 from openai import OpenAI
 from polyvia import Polyvia
 
-client = Polyvia(api_key="poly_...")
+client = Polyvia(api_key="poly_<key>")
 oai    = OpenAI()
 
 tools, call = client.tools.openai()
@@ -339,7 +339,7 @@ for tc in response.choices[0].message.tool_calls or []:
 import anthropic
 from polyvia import Polyvia
 
-client = Polyvia(api_key="poly_...")
+client = Polyvia(api_key="poly_<key>")
 ant    = anthropic.Anthropic()
 
 tools, call = client.tools.anthropic()
@@ -367,7 +367,7 @@ from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate
 from polyvia import Polyvia
 
-client = Polyvia(api_key="poly_...")
+client = Polyvia(api_key="poly_<key>")
 tools  = client.tools.langchain()
 
 prompt = ChatPromptTemplate.from_messages([
@@ -391,7 +391,7 @@ import asyncio
 from polyvia import AsyncPolyvia
 
 async def main():
-    async with AsyncPolyvia(api_key="poly_...") as client:
+    async with AsyncPolyvia(api_key="poly_<key>") as client:
         result = await client.ingest.file("report.pdf")
         await client.ingest.wait(result.task_id)
         answer = await client.query("Key findings?")
