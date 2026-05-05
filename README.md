@@ -75,6 +75,12 @@ client = Polyvia(api_key="poly_<key>")
 client = Polyvia()
 ```
 
+> **Workspace scoping.** Each key is permanently bound to the workspace
+> (personal or one organization) you were in when you minted it. The key sees
+> only that workspace's documents, groups, and chats — switching the active
+> workspace in the UI later doesn't change a key's scope. Mint separate keys
+> for each workspace you need to script against.
+
 ---
 
 ## REST API
