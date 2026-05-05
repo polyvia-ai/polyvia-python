@@ -97,6 +97,13 @@ class UsageStats(BaseModel):
     requests: UsageCounters
     ingests: UsageCounters
     queries: UsageCounters
+    # Workspace-scoped page count (sum across completed ingests in the
+    # workspace this key belongs to). `requests`/`ingests`/`queries` are
+    # per-key; `pages` and `audio_seconds` are per-workspace.
+    pages: UsageCounters
+    # Workspace-scoped audio seconds processed (whole seconds — convert to
+    # minutes for display if needed).
+    audio_seconds: UsageCounters
     documents_stored: int
 
 

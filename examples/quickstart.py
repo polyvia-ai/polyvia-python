@@ -53,6 +53,8 @@ u = usage.usage
 print(f"  requests : {u.requests.period} / {u.requests.total} all-time")
 print(f"  ingests  : {u.ingests.period}  / {u.ingests.total} all-time")
 print(f"  queries  : {u.queries.period}  / {u.queries.total} all-time")
+print(f"  pages    : {u.pages.period}    / {u.pages.total} all-time")
+print(f"  audio    : {u.audio_seconds.period / 60:.1f} min / {u.audio_seconds.total / 60:.1f} min all-time")
 print(f"  stored   : {u.documents_stored} documents")
 
 limits = client.rate_limits()
