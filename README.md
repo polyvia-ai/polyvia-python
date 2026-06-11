@@ -88,15 +88,16 @@ client = Polyvia()
 ### Ingest
 
 ```python
-# Single file — returns immediately with a task_id to poll
-result = client.ingest.file("report.pdf", name="Q4 Report", group_id="g_<id>")
+# Single file — pass the group **name** (created if it doesn't exist yet).
+# Returns immediately with a task_id to poll.
+result = client.ingest.file("report.pdf", name="Q4 Report", group="Finance")
 # IngestResult(document_id='<id>', task_id='<id>', status='pending')
 
-# Multiple files in one request
+# Multiple files in one request (the group is resolved once for the batch)
 batch = client.ingest.batch(
     ["q3.pdf", "q4.pdf"],
     names=["Q3 Report", "Q4 Report"],
-    group_id="g_<id>",
+    group="Finance",
 )
 
 # Check status
@@ -116,10 +117,10 @@ answer = client.query("What risks are mentioned across all reports?")
 # Single document (fastest)
 answer = client.query("Summarise section 3.", document_id="doc_<id>")
 
-# Scoped to a group
-answer = client.query("Key findings?", group_id="g_<id>")
+# Scoped to a group — by name (the group must already exist)
+answer = client.query("Key findings?", group="Finance")
 
-# Scoped to multiple groups
+# Scoped to multiple groups — by id
 answer = client.query("Compare results.", group_ids=["g_<id>", "g_<id>"])
 
 print(answer.answer)
@@ -127,21 +128,33 @@ print(answer.answer)
 
 ### Groups
 
+Groups have a human **name** and an opaque backend **id**. You rarely need the
+id — pass the name straight to `ingest` / `query` (above) and the SDK resolves
+it. When you do want the group object, `get_or_create` is the easy way in.
+
 ```python
-# Create
-group = client.groups.create("Finance")
-group_id = group["group_id"]
+# Idempotent: returns the existing "Finance" group, or creates it. Matched by
+# exact name, so it never makes duplicates. Returns a Group.
+group = client.groups.get_or_create("Finance")
+group.id      # the backend id, if you ever need it
+group.name    # "Finance"
+
+# Look one up without creating it (returns None if there isn't one)
+existing = client.groups.find("Finance")
 
 # List
 for g in client.groups.list():
     print(g.name, g.id, g.color)
 
 # Delete all documents in a group, then the group itself
-client.groups.delete(group_id, delete_documents=True)
+client.groups.delete(group.id, delete_documents=True)
 
 # Or separately
-client.groups.delete_documents(group_id)   # wipe documents, keep group
-client.groups.delete(group_id)             # remove empty group
+client.groups.delete_documents(group.id)   # wipe documents, keep group
+client.groups.delete(group.id)             # remove empty group
+
+# create() always makes a NEW group, even if the name exists — prefer
+# get_or_create() unless you specifically want a fresh one each time.
 ```
 
 ### Documents
@@ -184,10 +197,18 @@ Polyvia runs a hosted [Model Context Protocol](https://modelcontextprotocol.io) 
 `https://app.polyvia.ai/mcp`. Connect your AI client once and it can ingest, search,
 and query documents without any manual tool-dispatch code.
 
+**Using Claude Code?** Add the server with one command:
+
+```bash
+claude mcp add --transport http polyvia https://app.polyvia.ai/mcp \
+  --header "Authorization: Bearer poly_<key>"
+```
+
 `client.mcp` returns an `MCPConfig` object with a helper for every major client:
 
 | Method | Use with |
 |--------|----------|
+| `claude_code_command()` | The `claude mcp add …` command line above |
 | `to_anthropic_mcp_server()` | `ant.beta.messages.create(mcp_servers=[...])` |
 | `to_openai_responses_tool()` | `oai.responses.create(tools=[...])` |
 | `to_openai_mcp_server()` | OpenAI Agents SDK `MCPServerStreamableHTTP` |

@@ -26,7 +26,7 @@ Quick start::
     tools        = client.tools.langchain()
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 from ._client import AsyncPolyvia, Polyvia
 from ._exceptions import (

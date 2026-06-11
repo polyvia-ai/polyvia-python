@@ -41,6 +41,26 @@ class MCPConfig:
             "headers": self.headers,
         }
 
+    # ── Claude Code (CLI) ──────────────────────────────────────
+
+    def claude_code_command(self, *, name: str = "polyvia") -> str:
+        """Return the ``claude mcp add`` command that registers this server in
+        Claude Code. Run the printed line in your terminal::
+
+            print(client.mcp.claude_code_command())
+            # claude mcp add --transport http polyvia https://app.polyvia.ai/mcp \\
+            #   --header "Authorization: Bearer poly_<key>"
+        """
+        parts = ["claude", "mcp", "add", "--transport", "http", name, self.url]
+        for key, value in self.headers.items():
+            parts.append("--header")
+            parts.append(f'"{key}: {value}"')
+        return " ".join(parts)
+
+    def print_claude_code_command(self, *, name: str = "polyvia") -> None:
+        """Print the ``claude mcp add`` command for Claude Code."""
+        print(self.claude_code_command(name=name))
+
     # ── OpenAI Responses API (remote MCP tool) ────────────────
 
     def to_openai_responses_tool(
