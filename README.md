@@ -63,7 +63,7 @@ Requires Python 3.9+.
 
 ## Authentication
 
-Generate an API key at **[app.polyvia.ai → Settings → API](https://app.polyvia.ai/settings)**.
+Generate an API key at **[app.polyvia.ai → API](https://app.polyvia.ai/api-keys)**.
 All keys start with `poly_`.
 
 ```python
